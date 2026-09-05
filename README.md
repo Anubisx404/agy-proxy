@@ -2,15 +2,14 @@
 
 An OpenAI-compatible API proxy for [Google Antigravity (AGY)](https://blog.google/technology/google-deepmind/antigravity-ai-coding/) CLI. Run AGY models — Gemini, Claude, GPT — through any OpenAI-compatible client.
 
-```
-┌─────────────────┐     POST /v1/chat/completions     ┌───────────┐     stdin/stdout     ┌─────────┐
-│  Any OpenAI     │ ──────────────────────────────────▶│ AGY Proxy │───────────────────▶  │ agy CLI │
-│  Client         │ ◀──────────────────────────────────│ :8642     │◀──────────────────   │         │
-│  (Hermes, etc.) │     SSE stream / JSON response     └───────────┘                     └─────────┘
-└─────────────────┘                                                                          │
-                                                                                             ▼
-                                                                                    Google AGY Backend
-                                                                                  (Gemini/Claude/GPT)
+```mermaid
+graph LR
+    A["Any OpenAI Client<br/>(Hermes, Continue, Cursor, etc.)"] -->|"POST /v1/chat/completions"| B["AGY Proxy<br/>:8642"]
+    B -->|"SSE stream / JSON response"| A
+    B -->|"stdin"| C["agy CLI"]
+    C -->|"stdout"| B
+    C -->|"Google OAuth"| D["Google AGY Backend<br/>(Gemini / Claude / GPT)"]
+    D --> C
 ```
 
 ## Features
