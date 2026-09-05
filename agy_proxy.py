@@ -269,8 +269,8 @@ def _run_agy_sync(
     if not output.strip() and proc.stderr:
         stderr_clean = _strip_ansi(proc.stderr)
         filtered = "\n".join(
-            l for l in stderr_clean.splitlines()
-            if not l.strip().startswith("Fetching") and l.strip()
+            line for line in stderr_clean.splitlines()
+            if not line.strip().startswith("Fetching") and line.strip()
         )
         if filtered.strip():
             output = filtered
