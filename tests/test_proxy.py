@@ -1,6 +1,6 @@
 import json
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -38,9 +38,11 @@ def test_messages_to_prompt_multi_role():
 def test_messages_to_prompt_with_tool_results():
     messages = [
         {"role": "user", "content": "list files"},
-        {"role": "assistant", "content": None, "tool_calls": [
-            {"function": {"name": "list_dir", "arguments": '{"path": "."}'}}
-        ]},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [{"function": {"name": "list_dir", "arguments": '{"path": "."}'}}],
+        },
         {"role": "tool", "name": "list_dir", "tool_call_id": "call_123", "content": "file1.py\nfile2.py"},
         {"role": "user", "content": "thanks"},
     ]
@@ -53,10 +55,13 @@ def test_messages_to_prompt_with_tool_results():
 
 def test_messages_to_prompt_multimodal_content():
     messages = [
-        {"role": "user", "content": [
-            {"type": "text", "text": "Describe this"},
-            {"type": "image_url", "image_url": {"url": "http://example.com/img.png"}},
-        ]},
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Describe this"},
+                {"type": "image_url", "image_url": {"url": "http://example.com/img.png"}},
+            ],
+        },
     ]
     result = agy_proxy._messages_to_prompt(messages)
     assert "Describe this" in result
@@ -64,20 +69,20 @@ def test_messages_to_prompt_multimodal_content():
 
 def test_messages_to_prompt_with_tools():
     messages = [{"role": "user", "content": "do something"}]
-    tools = [{
-        "type": "function",
-        "function": {
-            "name": "read_file",
-            "description": "Read a file",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "File path"}
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "read_file",
+                "description": "Read a file",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"path": {"type": "string", "description": "File path"}},
+                    "required": ["path"],
                 },
-                "required": ["path"]
-            }
+            },
         }
-    }]
+    ]
     result = agy_proxy._messages_to_prompt(messages, tools)
     assert "<<<TOOL_CALLS>>>" in result
     assert "read_file" in result
@@ -118,7 +123,7 @@ def test_parse_tool_calls_multiple():
 
 
 def test_parse_tool_calls_invalid_json():
-    text = '<<<TOOL_CALLS>>>\nnot valid json\n<<<END_TOOL_CALLS>>>'
+    text = "<<<TOOL_CALLS>>>\nnot valid json\n<<<END_TOOL_CALLS>>>"
     content, calls = agy_proxy._parse_tool_calls(text)
     assert calls is None
     assert content == text
@@ -131,21 +136,23 @@ def test_parse_tool_calls_no_end_marker():
 
 
 def test_tools_to_description():
-    tools = [{
-        "type": "function",
-        "function": {
-            "name": "run_command",
-            "description": "Execute a shell command",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "cmd": {"type": "string", "description": "The command"},
-                    "cwd": {"type": "string", "description": "Working directory"}
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "run_command",
+                "description": "Execute a shell command",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "cmd": {"type": "string", "description": "The command"},
+                        "cwd": {"type": "string", "description": "Working directory"},
+                    },
+                    "required": ["cmd"],
                 },
-                "required": ["cmd"]
-            }
+            },
         }
-    }]
+    ]
     result = agy_proxy._tools_to_description(tools)
     assert "run_command" in result
     assert "Execute a shell command" in result
@@ -194,6 +201,7 @@ def test_completion_response_with_tools():
 @pytest.mark.asyncio
 async def test_health_endpoint():
     from fastapi.testclient import TestClient
+
     with patch.object(agy_proxy, "_find_agy", return_value="/usr/bin/agy"):
         with patch.object(agy_proxy, "_fetch_models", return_value=[{"id": "m1", "name": "M1"}]):
             client = TestClient(agy_proxy.app)
@@ -206,9 +214,14 @@ async def test_health_endpoint():
 
 def test_list_models_endpoint():
     from fastapi.testclient import TestClient
-    with patch.object(agy_proxy, "_fetch_models", return_value=[
-        {"id": "gemini-3.8-flash-medium", "name": "Gemini 3.8 Flash (Medium)"},
-    ]):
+
+    with patch.object(
+        agy_proxy,
+        "_fetch_models",
+        return_value=[
+            {"id": "gemini-3.8-flash-medium", "name": "Gemini 3.8 Flash (Medium)"},
+        ],
+    ):
         client = TestClient(agy_proxy.app)
         response = client.get("/v1/models")
         assert response.status_code == 200
@@ -221,9 +234,14 @@ def test_list_models_endpoint():
 
 def test_get_model_endpoint():
     from fastapi.testclient import TestClient
-    with patch.object(agy_proxy, "_fetch_models", return_value=[
-        {"id": "gemini-3.8-flash-medium", "name": "Gemini 3.8 Flash (Medium)"},
-    ]):
+
+    with patch.object(
+        agy_proxy,
+        "_fetch_models",
+        return_value=[
+            {"id": "gemini-3.8-flash-medium", "name": "Gemini 3.8 Flash (Medium)"},
+        ],
+    ):
         client = TestClient(agy_proxy.app)
         response = client.get("/v1/models/gemini-3.8-flash-medium")
         assert response.status_code == 200

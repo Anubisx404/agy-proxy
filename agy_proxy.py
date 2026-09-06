@@ -146,7 +146,7 @@ def _parse_tool_calls(text: str) -> tuple[str | None, list[dict] | None]:
         return text, None
 
     before = text[:start_idx].strip()
-    json_str = text[start_idx + len(TOOL_CALL_START):end_idx].strip()
+    json_str = text[start_idx + len(TOOL_CALL_START) : end_idx].strip()
 
     try:
         calls_raw = json.loads(json_str)
@@ -166,14 +166,16 @@ def _parse_tool_calls(text: str) -> tuple[str | None, list[dict] | None]:
             arguments = json.dumps(arguments)
         elif not isinstance(arguments, str):
             arguments = json.dumps(arguments)
-        tool_calls.append({
-            "id": f"call_{uuid.uuid4().hex[:12]}",
-            "type": "function",
-            "function": {
-                "name": call["name"],
-                "arguments": arguments,
-            },
-        })
+        tool_calls.append(
+            {
+                "id": f"call_{uuid.uuid4().hex[:12]}",
+                "type": "function",
+                "function": {
+                    "name": call["name"],
+                    "arguments": arguments,
+                },
+            }
+        )
 
     if not tool_calls:
         return text, None
@@ -228,11 +230,7 @@ def _messages_to_prompt(messages: list[dict], tools: list[dict] | None = None) -
 
 
 def _get_cwd(working_directory: str | None = None) -> str:
-    return (
-        working_directory
-        or os.environ.get("AGY_PROXY_CWD")
-        or str(Path.home())
-    )
+    return working_directory or os.environ.get("AGY_PROXY_CWD") or str(Path.home())
 
 
 def _run_agy_sync(
@@ -244,10 +242,14 @@ def _run_agy_sync(
     agy = _find_agy()
     cmd = [
         agy,
-        "--model", model,
-        "--mode", "plan",
-        "--output-format", "text",
-        "--print-timeout", f"{timeout_seconds}s",
+        "--model",
+        model,
+        "--mode",
+        "plan",
+        "--output-format",
+        "text",
+        "--print-timeout",
+        f"{timeout_seconds}s",
     ]
 
     cwd = _get_cwd(working_directory)
@@ -269,8 +271,7 @@ def _run_agy_sync(
     if not output.strip() and proc.stderr:
         stderr_clean = _strip_ansi(proc.stderr)
         filtered = "\n".join(
-            line for line in stderr_clean.splitlines()
-            if not line.strip().startswith("Fetching") and line.strip()
+            line for line in stderr_clean.splitlines() if not line.strip().startswith("Fetching") and line.strip()
         )
         if filtered.strip():
             output = filtered
@@ -288,10 +289,14 @@ async def _run_agy_streaming(
     agy = _find_agy()
     cmd = [
         agy,
-        "--model", model,
-        "--mode", "plan",
-        "--output-format", "text",
-        "--print-timeout", f"{timeout_seconds}s",
+        "--model",
+        model,
+        "--mode",
+        "plan",
+        "--output-format",
+        "text",
+        "--print-timeout",
+        f"{timeout_seconds}s",
     ]
 
     cwd = _get_cwd(working_directory)
@@ -335,11 +340,13 @@ async def _run_agy_streaming(
                     "object": "chat.completion.chunk",
                     "created": int(time.time()),
                     "model": model,
-                    "choices": [{
-                        "index": 0,
-                        "delta": {"content": content},
-                        "finish_reason": None,
-                    }],
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {"content": content},
+                            "finish_reason": None,
+                        }
+                    ],
                 }
                 yield f"data: {json.dumps(delta)}\n\n"
 
@@ -349,11 +356,13 @@ async def _run_agy_streaming(
                 "object": "chat.completion.chunk",
                 "created": int(time.time()),
                 "model": model,
-                "choices": [{
-                    "index": 0,
-                    "delta": {"content": buffer},
-                    "finish_reason": None,
-                }],
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {"content": buffer},
+                        "finish_reason": None,
+                    }
+                ],
             }
             yield f"data: {json.dumps(delta)}\n\n"
 
@@ -362,11 +371,13 @@ async def _run_agy_streaming(
             "object": "chat.completion.chunk",
             "created": int(time.time()),
             "model": model,
-            "choices": [{
-                "index": 0,
-                "delta": {},
-                "finish_reason": "stop",
-            }],
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {},
+                    "finish_reason": "stop",
+                }
+            ],
         }
         yield f"data: {json.dumps(final)}\n\n"
         yield "data: [DONE]\n\n"
@@ -491,9 +502,11 @@ async def chat_completions(request: Request):
         response = _completion_response(request_id, model, content, tool_calls, prompt, output)
 
         if stream:
+
             async def _stream_response():
                 yield f"data: {json.dumps(response)}\n\n"
                 yield "data: [DONE]\n\n"
+
             return StreamingResponse(
                 _stream_response(),
                 media_type="text/event-stream",
