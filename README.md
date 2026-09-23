@@ -196,18 +196,18 @@ print(response.choices[0].message.content)
 1. Your client sends a standard OpenAI chat completion request to the proxy
 2. The proxy converts the `messages` array into a flat text prompt
 3. If `tools` are provided, they're injected as structured instructions so the model knows how to call them
-4. The prompt is piped via stdin to `agy --model <model> --mode plan --output-format text`
+4. The prompt is piped via stdin to `agy --model <model> --output-format text --dangerously-skip-permissions`
 5. AGY authenticates with Google, runs the model, and returns the response
 6. The proxy parses the output — extracting any tool calls if present — and returns it in OpenAI format
-7. For streaming requests, stdout is read in chunks and forwarded as SSE events
+7. For streaming requests, responses are forwarded as OpenAI-compliant SSE chunks (`chat.completion.chunk`) with periodic keep-alive events
 
 ### Why stdin instead of CLI arguments?
 
 Windows has a 32,767-character limit on command-line arguments. Hermes sends full conversation history + tool schemas (often 50,000+ characters) in each request. Piping via stdin bypasses this limit entirely.
 
-### Why `--mode plan`?
+### Why `--dangerously-skip-permissions`?
 
-AGY is an agentic coding CLI — in its default mode it tries to use its own built-in tools. By forcing `plan` mode, the model just thinks and responds without attempting internal tool execution. The client (Hermes, etc.) handles all tool execution instead.
+AGY is an agentic coding CLI. When running as a background service without an interactive terminal, any permission prompt blocks indefinitely. Adding `--dangerously-skip-permissions` ensures smooth, non-blocking execution while Hermes controls tool dispatch and client permissions. If needed, the execution mode can be customized using the `AGY_MODE` environment variable.
 
 ## Run in Background
 

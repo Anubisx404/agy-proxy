@@ -1,5 +1,15 @@
 # Changelog
 
+## v2.1.0 — 2026-09-23
+
+### Fixed
+- **Subprocess Permission Prompt Blocking:** Added `--dangerously-skip-permissions` to the AGY command line so the headless background subprocess never blocks on unhandled interactive permission prompts.
+- **Agent Mode Conflation:** Removed the hardcoded `--mode plan` flag from default execution to prevent AGY from hijacking conversational turns into autonomous planning artifacts. This eliminates multi-minute planning delays and restores standard, low-latency LLM responses. Custom modes remain accessible via the `AGY_MODE` environment variable.
+- **Streaming Tool-Call Schema:** Fixed streaming tool-call responses to emit OpenAI-compliant `chat.completion.chunk` structures containing `delta` objects rather than non-streaming `message` objects, eliminating `ValidationError` crashes in OpenAI client libraries.
+- **SSE Keepalive Heartbeats:** Added periodic `: keep-alive\n\n` comments during inference latency to maintain active TCP sockets and prevent HTTP client read and gateway timeouts.
+- **Model Name & Prefix Resolution:** Added `_resolve_model()` with fuzzy and provider prefix normalization (`antigravity/`, `custom/`) so Hermes and other client model configurations resolve accurately without strict ID mismatch errors (HTTP 400).
+- **Tool JSON Parsing:** Added automatic stripping of markdown code fences (```json ... ```) from model-generated `<<<TOOL_CALLS>>>` payloads to prevent `JSONDecodeError`.
+
 ## v2.0.0 — 2026-09-06
 
 Initial open-source release.

@@ -49,7 +49,7 @@ logging.basicConfig(
 )
 log = logging.getLogger("agy_proxy")
 
-app = FastAPI(title="AGY Proxy", version="2.0.0")
+app = FastAPI(title="AGY Proxy", version="2.1.0")
 
 _model_cache: dict[str, Any] = {"ts": 0.0, "models": []}
 
@@ -584,7 +584,7 @@ async def get_model(model_id: str):
 async def health():
     try:
         _find_agy()
-        return {"status": "ok", "version": "2.0.0", "tool_calling": True, "models": len(_fetch_models())}
+        return {"status": "ok", "version": "2.1.0", "tool_calling": True, "models": len(_fetch_models())}
     except Exception as exc:
         return JSONResponse(status_code=503, content={"status": "error", "detail": str(exc)})
 
