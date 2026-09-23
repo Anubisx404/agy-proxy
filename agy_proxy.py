@@ -80,6 +80,24 @@ def _subprocess_flags() -> int:
     return 0
 
 
+def _build_cmd(model: str, timeout_seconds: int) -> list[str]:
+    agy = _find_agy()
+    cmd = [
+        agy,
+        "--model",
+        model,
+        "--output-format",
+        "text",
+        "--dangerously-skip-permissions",
+        "--print-timeout",
+        f"{timeout_seconds}s",
+    ]
+    mode = os.environ.get("AGY_MODE")
+    if mode:
+        cmd.extend(["--mode", mode])
+    return cmd
+
+
 def _fetch_models() -> list[dict[str, str]]:
     now = time.time()
     if now - _model_cache["ts"] < MODEL_CACHE_TTL and _model_cache["models"]:
@@ -111,6 +129,18 @@ def _fetch_models() -> list[dict[str, str]]:
     except Exception as exc:
         log.error("Failed to fetch models: %s", exc)
         return _model_cache.get("models", [])
+
+
+def _resolve_model(model: str, known: set[str]) -> str | None:
+    if model in known:
+        return model
+    stripped = model.split("/")[-1] if "/" in model else model
+    if stripped in known:
+        return stripped
+    for k in known:
+        if k.lower() == model.lower() or k.lower() == stripped.lower():
+            return k
+    return None
 
 
 def _tools_to_description(tools: list[dict]) -> str:
@@ -147,6 +177,14 @@ def _parse_tool_calls(text: str) -> tuple[str | None, list[dict] | None]:
 
     before = text[:start_idx].strip()
     json_str = text[start_idx + len(TOOL_CALL_START) : end_idx].strip()
+
+    if json_str.startswith("```"):
+        lines = json_str.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        json_str = "\n".join(lines).strip()
 
     try:
         calls_raw = json.loads(json_str)
@@ -239,19 +277,7 @@ def _run_agy_sync(
     timeout_seconds: int = 300,
     working_directory: str | None = None,
 ) -> str:
-    agy = _find_agy()
-    cmd = [
-        agy,
-        "--model",
-        model,
-        "--mode",
-        "plan",
-        "--output-format",
-        "text",
-        "--print-timeout",
-        f"{timeout_seconds}s",
-    ]
-
+    cmd = _build_cmd(model, timeout_seconds)
     cwd = _get_cwd(working_directory)
     log.info("Running AGY: model=%s cwd=%s prompt_len=%d", model, cwd, len(prompt))
 
@@ -279,6 +305,107 @@ def _run_agy_sync(
     return output.strip()
 
 
+async def _stream_tool_calls(
+    prompt: str,
+    model: str,
+    timeout: int,
+    request_id: str,
+    cwd: str | None = None,
+) -> AsyncIterator[str]:
+    loop = asyncio.get_running_loop()
+    task = loop.run_in_executor(None, _run_agy_sync, prompt, model, timeout, cwd)
+    while not task.done():
+        try:
+            await asyncio.wait_for(asyncio.shield(task), timeout=5.0)
+            break
+        except asyncio.TimeoutError:
+            yield ": keep-alive\n\n"
+
+    output = await task
+    content, tool_calls = _parse_tool_calls(output)
+
+    if tool_calls:
+        delta_tool_calls = []
+        for idx, tc in enumerate(tool_calls):
+            delta_tool_calls.append(
+                {
+                    "index": idx,
+                    "id": tc["id"],
+                    "type": "function",
+                    "function": {
+                        "name": tc["function"]["name"],
+                        "arguments": tc["function"]["arguments"],
+                    },
+                }
+            )
+        chunk = {
+            "id": f"chatcmpl-{request_id}",
+            "object": "chat.completion.chunk",
+            "created": int(time.time()),
+            "model": model,
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {
+                        "role": "assistant",
+                        "content": content,
+                        "tool_calls": delta_tool_calls,
+                    },
+                    "finish_reason": None,
+                }
+            ],
+        }
+        yield f"data: {json.dumps(chunk)}\n\n"
+        final = {
+            "id": f"chatcmpl-{request_id}",
+            "object": "chat.completion.chunk",
+            "created": int(time.time()),
+            "model": model,
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {},
+                    "finish_reason": "tool_calls",
+                }
+            ],
+        }
+        yield f"data: {json.dumps(final)}\n\n"
+    else:
+        chunk = {
+            "id": f"chatcmpl-{request_id}",
+            "object": "chat.completion.chunk",
+            "created": int(time.time()),
+            "model": model,
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {
+                        "role": "assistant",
+                        "content": output,
+                    },
+                    "finish_reason": None,
+                }
+            ],
+        }
+        yield f"data: {json.dumps(chunk)}\n\n"
+        final = {
+            "id": f"chatcmpl-{request_id}",
+            "object": "chat.completion.chunk",
+            "created": int(time.time()),
+            "model": model,
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {},
+                    "finish_reason": "stop",
+                }
+            ],
+        }
+        yield f"data: {json.dumps(final)}\n\n"
+
+    yield "data: [DONE]\n\n"
+
+
 async def _run_agy_streaming(
     prompt: str,
     model: str,
@@ -286,19 +413,7 @@ async def _run_agy_streaming(
     working_directory: str | None = None,
     request_id: str = "",
 ) -> AsyncIterator[str]:
-    agy = _find_agy()
-    cmd = [
-        agy,
-        "--model",
-        model,
-        "--mode",
-        "plan",
-        "--output-format",
-        "text",
-        "--print-timeout",
-        f"{timeout_seconds}s",
-    ]
-
+    cmd = _build_cmd(model, timeout_seconds)
     cwd = _get_cwd(working_directory)
 
     proc = await asyncio.create_subprocess_exec(
@@ -318,10 +433,17 @@ async def _run_agy_streaming(
 
     try:
         while True:
-            chunk = await asyncio.wait_for(
-                proc.stdout.read(256),
-                timeout=timeout_seconds + 30,
-            )
+            try:
+                chunk = await asyncio.wait_for(
+                    proc.stdout.read(256),
+                    timeout=5.0,
+                )
+            except asyncio.TimeoutError:
+                if proc.returncode is not None:
+                    break
+                yield ": keep-alive\n\n"
+                continue
+
             if not chunk:
                 break
             text = _strip_ansi(chunk.decode("utf-8", errors="replace"))
@@ -474,7 +596,7 @@ async def chat_completions(request: Request):
     except Exception:
         raise HTTPException(400, "Invalid JSON body")
 
-    model = body.get("model", "gemini-3.8-flash-medium")
+    raw_model = body.get("model", "gemini-3.8-flash-medium")
     messages = body.get("messages", [])
     stream = body.get("stream", False)
     tools = body.get("tools")
@@ -483,36 +605,30 @@ async def chat_completions(request: Request):
     if not messages:
         raise HTTPException(400, "messages is required")
 
-    known = {m["id"] for m in _fetch_models()}
-    if model not in known:
-        available = ", ".join(sorted(known)) if known else "none available"
-        raise HTTPException(400, f"Unknown model: {model}. Available: {available}")
+    known_models = {m["id"] for m in _fetch_models()}
+    resolved = _resolve_model(raw_model, known_models)
+    if not resolved:
+        available = ", ".join(sorted(known_models)) if known_models else "none available"
+        raise HTTPException(400, f"Unknown model: {raw_model}. Available: {available}")
+    model = resolved
 
     has_tools = bool(tools and isinstance(tools, list) and len(tools) > 0)
     prompt = _messages_to_prompt(messages, tools if has_tools else None)
     request_id = uuid.uuid4().hex[:12]
 
     if has_tools:
+        if stream:
+            return StreamingResponse(
+                _stream_tool_calls(prompt, model, timeout, request_id),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Request-Id": request_id},
+            )
+
         loop = asyncio.get_event_loop()
         output = await loop.run_in_executor(None, _run_agy_sync, prompt, model, timeout)
-
         content, tool_calls = _parse_tool_calls(output)
         log.info("Tool call parse: has_tool_calls=%s content_len=%s", tool_calls is not None, len(content or ""))
-
-        response = _completion_response(request_id, model, content, tool_calls, prompt, output)
-
-        if stream:
-
-            async def _stream_response():
-                yield f"data: {json.dumps(response)}\n\n"
-                yield "data: [DONE]\n\n"
-
-            return StreamingResponse(
-                _stream_response(),
-                media_type="text/event-stream",
-                headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
-            )
-        return response
+        return _completion_response(request_id, model, content, tool_calls, prompt, output)
 
     if stream:
         return StreamingResponse(

@@ -122,6 +122,14 @@ def test_parse_tool_calls_multiple():
     assert len(calls) == 2
 
 
+def test_parse_tool_calls_markdown_fenced():
+    text = '<<<TOOL_CALLS>>>\n```json\n[{"name": "read_file", "arguments": {"path": "c.py"}}]\n```\n<<<END_TOOL_CALLS>>>'
+    content, calls = agy_proxy._parse_tool_calls(text)
+    assert content is None
+    assert len(calls) == 1
+    assert calls[0]["function"]["name"] == "read_file"
+
+
 def test_parse_tool_calls_invalid_json():
     text = "<<<TOOL_CALLS>>>\nnot valid json\n<<<END_TOOL_CALLS>>>"
     content, calls = agy_proxy._parse_tool_calls(text)
@@ -133,6 +141,26 @@ def test_parse_tool_calls_no_end_marker():
     text = '<<<TOOL_CALLS>>>\n[{"name": "test"}]'
     content, calls = agy_proxy._parse_tool_calls(text)
     assert calls is None
+
+
+def test_build_cmd_flags():
+    with patch.object(agy_proxy, "_find_agy", return_value="agy"):
+        cmd = agy_proxy._build_cmd("gemini-3.8-flash-medium", 120)
+        assert "--dangerously-skip-permissions" in cmd
+        assert "--mode" not in cmd
+        assert "--output-format" in cmd
+        assert "text" in cmd
+        assert "--print-timeout" in cmd
+        assert "120s" in cmd
+
+
+def test_resolve_model():
+    known = {"gemini-3.8-flash-medium", "claude-sonnet-4-6"}
+    assert agy_proxy._resolve_model("gemini-3.8-flash-medium", known) == "gemini-3.8-flash-medium"
+    assert agy_proxy._resolve_model("antigravity/gemini-3.8-flash-medium", known) == "gemini-3.8-flash-medium"
+    assert agy_proxy._resolve_model("custom/claude-sonnet-4-6", known) == "claude-sonnet-4-6"
+    assert agy_proxy._resolve_model("GEMINI-3.8-FLASH-MEDIUM", known) == "gemini-3.8-flash-medium"
+    assert agy_proxy._resolve_model("unknown-model", known) is None
 
 
 def test_tools_to_description():
@@ -249,3 +277,23 @@ def test_get_model_endpoint():
 
         response = client.get("/v1/models/nonexistent")
         assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_stream_tool_calls():
+    output = '<<<TOOL_CALLS>>>\n[{"name": "read_file", "arguments": {"path": "test.txt"}}]\n<<<END_TOOL_CALLS>>>'
+    with patch.object(agy_proxy, "_run_agy_sync", return_value=output):
+        chunks = []
+        async for chunk in agy_proxy._stream_tool_calls("prompt", "gemini-3.8-flash-medium", 30, "req123"):
+            chunks.append(chunk)
+
+        data_chunks = [c for c in chunks if c.startswith("data: ") and not c.startswith("data: [DONE]")]
+        assert len(data_chunks) >= 2
+        first = json.loads(data_chunks[0][6:].strip())
+        assert first["object"] == "chat.completion.chunk"
+        assert "delta" in first["choices"][0]
+        assert "tool_calls" in first["choices"][0]["delta"]
+        assert first["choices"][0]["delta"]["tool_calls"][0]["function"]["name"] == "read_file"
+        second = json.loads(data_chunks[1][6:].strip())
+        assert second["choices"][0]["finish_reason"] == "tool_calls"
+        assert chunks[-1] == "data: [DONE]\n\n"
